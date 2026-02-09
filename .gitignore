@@ -1,0 +1,15 @@
+# Node (Backend)
+node_modules/
+.env
+
+# Flutter (Frontend)
+.dart_tool/
+.idea/
+build/
+android/.gradle
+ios/.symlinks
+ios/Pods/
+*.apk
+*.aab
+
+frontend/
