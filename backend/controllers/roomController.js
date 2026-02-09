@@ -30,9 +30,19 @@ const joinRoom = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+const deleteRoom = async (req, res) => {
+    try {
+        const { id } = req.params;
+        await Room.findByIdAndDelete(id);
+        // Optional: Remove users from this room
+        // await User.updateMany({ joinedRoomCode: ... }, { joinedRoomCode: null });
+        res.json({ success: true, message: "Location deleted" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
 
 export default {
     createRoom,
     getAllRooms,
-    joinRoom
+    joinRoom,
+    deleteRoom
 };

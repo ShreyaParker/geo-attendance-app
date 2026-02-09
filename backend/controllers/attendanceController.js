@@ -112,5 +112,10 @@ const getDashboard = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
-export default { updateStatus, getDashboard };
+const getAlerts = async (req, res) => {
+    try {
+        const alerts = await Alert.find().sort({ timestamp: -1 }).limit(50);
+        res.json(alerts);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+export default { updateStatus, getDashboard,getAlerts };
