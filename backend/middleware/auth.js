@@ -11,6 +11,7 @@ export const verifyToken = (req, res, next) => {
         const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || 'secret_key');
         req.userId = decoded.id;
         req.userRole = decoded.role;
+        console.log(`🔐 Token Decoded -> User: ${req.userId}, Role: ${req.userRole}`);
         next();
     } catch (err) {
         return res.status(401).json({ error: "Unauthorized: Invalid Token" });
@@ -18,6 +19,7 @@ export const verifyToken = (req, res, next) => {
 };
 
 export const isAdmin = (req, res, next) => {
+    console.log(`👮 Admin Check -> Role is: ${req.userRole}`);
     if (req.userRole !== 'admin') {
         return res.status(403).json({ error: "Access Denied: Admins Only" });
     }
