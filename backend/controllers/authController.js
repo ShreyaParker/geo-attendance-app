@@ -1,32 +1,34 @@
 import User from '../models/User.js';
 import Room from '../models/Room.js';
+import jwt from 'jsonwebtoken';
 
-const login = async (req, res) => {
+export const login = async (req, res) => {
     try {
-        const { name, email, role } = req.body;
-        let user = await User.findOne({ email });
+        const { email, name, role } = req.body;
 
+
+        let user = await User.findOne({ email });
         if (!user) {
-            user = new User({ name, email, role, history: [] });
+            user = new User({ email, name, role });
             await user.save();
         }
 
-        let roomDetails = null;
+        const token = jwt.sign(
+            { id: user._id, role: user.role },
+            process.env.JWT_SECRET || 'secret_key',
+            { expiresIn: '30d' }
+        );
+
+
+        let roomData = null;
         if (user.joinedRoomCode) {
-            roomDetails = await Room.findOne({ code: user.joinedRoomCode });
+            roomData = await Room.findOne({ code: user.joinedRoomCode });
         }
 
         res.json({
-            ...user.toObject(),
-            roomLat: roomDetails ? roomDetails.lat : null,
-            roomLng: roomDetails ? roomDetails.lng : null,
-            roomRadius: roomDetails ? roomDetails.radius : null,
-            roomName: roomDetails ? roomDetails.name : null
+            token,
+            user,
+            room: roomData
         });
-
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };
-
-export default { login };
