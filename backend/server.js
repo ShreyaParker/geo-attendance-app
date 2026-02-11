@@ -35,7 +35,11 @@ app.get('/api/admin/alerts', verifyToken, isAdmin, getAlerts);
 
 app.post('/api/join-room', verifyToken, joinRoom);
 app.post('/api/update-status', verifyToken, (req, res) => updateStatus(req, res, io));
-
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "DELETE", "UPDATE", "PUT", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/geo_pro')
     .then(() => console.log("✅ MongoDB Connected"))
