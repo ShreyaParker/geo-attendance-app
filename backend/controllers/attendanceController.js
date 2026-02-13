@@ -137,3 +137,62 @@ export const getAlerts = async (req, res) => {
         res.json(alerts);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
+const parseDurationToMinutes = (str) => {
+    if (!str) return 0;
+    let minutes = 0;
+    const hoursMatch = str.match(/(\d+)h/);
+    const minsMatch = str.match(/(\d+)m/);
+    if (hoursMatch) minutes += parseInt(hoursMatch[1]) * 60;
+    if (minsMatch) minutes += parseInt(minsMatch[1]);
+    return minutes;
+};
+
+export const getMonthlyAttendance = async (req, res) => {
+    try {
+        const { roomCode, month, year } = req.query;
+        
+     
+        const users = await User.find({ joinedRoomCode: roomCode });
+
+    
+        const calendarData = {}; 
+        
+
+        users.forEach(user => {
+            user.history.forEach(session => {
+                const date = new Date(session.start).toISOString().split('T')[0];
+                
+                const sessionDate = new Date(session.start);
+                if (sessionDate.getMonth() + 1 !== parseInt(month) || sessionDate.getFullYear() !== parseInt(year)) return;
+
+               
+                const outMinutes = parseDurationToMinutes(session.outDuration);
+                let status = 'PRESENT';
+                
+                if (outMinutes > 120) status = 'ABSENT_VIOLATION'; 
+
+                if (!calendarData[date]) {
+                    calendarData[date] = { date, present: 0, absent: 0, flagged: 0, records: [] };
+                }
+
+         
+                if (status === 'PRESENT') calendarData[date].present++;
+                else calendarData[date].flagged++;
+
+                calendarData[date].records.push({
+                    userId: user._id,
+                    name: user.name,
+                    status: status, 
+                    inTime: session.start,
+                    outTime: session.end,
+                    totalOutDuration: session.outDuration,
+                    outMinutes: outMinutes
+                });
+            });
+        });
+
+        res.json(calendarData);
+
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
