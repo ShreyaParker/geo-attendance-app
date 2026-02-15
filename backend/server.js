@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
 import roomRoutes from "./routes/roomRoutes.js";
-import leaveRoutes form "./routes/leaveRoutes.js";
+import leaveRoutes from "./routes/leaveRoutes.js";
 
 dotenv.config();
 

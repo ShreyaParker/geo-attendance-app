@@ -1,5 +1,7 @@
 import { login, register, updateFaceModel } from '../controllers/authController.js';
 import Router from "express"
+import {verifyToken} from "../middleware/auth.js";
+
 const router = Router();
 
 router.post('/login', login);
