@@ -58,6 +58,9 @@ export const login = async (req, res) => {
         
     
         let roomData = null;
+        if (user.joinedRoomCode) {
+            roomData = await Room.findOne({ code: user.joinedRoomCode });
+        }
         
 
         res.json({ token, user, room: roomData });
