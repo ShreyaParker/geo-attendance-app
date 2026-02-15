@@ -25,28 +25,37 @@ export const deleteRoom = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-
 export const joinRoom = async (req, res) => {
     try {
         const { code } = req.body;
-        const userId = req.userId; // Extracted from Token
+        const userId = req.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: "User identity missing from request." });
+        }
 
         const user = await User.findById(userId);
+        
+        if (!user) {
+            return res.status(404).json({ error: "User session expired or user deleted. Please log in again." });
+        }
 
         if (user.joinedRoomCode) {
             return res.status(400).json({ error: "You are already locked to a location. Ask admin to remove you." });
         }
 
-        const room = await Room.findOne({ code });
+        const room = await Room.findOne({ code: code.trim() });
         if (!room) return res.status(404).json({ error: "Invalid Room Code" });
 
-
-        user.joinedRoomCode = code;
+        user.joinedRoomCode = code.trim();
         await user.save();
 
-        res.json({ success: true, room });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        res.json({ success: true, room, user });
+    } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+    }
 };
+
 
 
 export const kickUser = async (req, res) => {
