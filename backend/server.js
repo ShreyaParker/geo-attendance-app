@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
 import roomRoutes from "./routes/roomRoutes.js";
+import leaveRoutes form "./routes/leaveRoutes.js";
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.set('io', io);
 app.use('/api', authRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api',roomRoutes);
+app.use('/api', leaveRoutes);
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/geo_pro')
     .then(() => console.log("✅ MongoDB Connected"))
