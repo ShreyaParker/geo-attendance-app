@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Room from '../models/Room.js'
 import jwt from 'jsonwebtoken';
 
 export const register = async (req, res) => {
