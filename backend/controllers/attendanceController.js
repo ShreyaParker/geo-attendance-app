@@ -196,3 +196,29 @@ export const getMonthlyAttendance = async (req, res) => {
 
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+export const getUserDetails = async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Find user and include their shift history
+        const user = await User.findById(id).select('-password'); // Exclude password for security
+        
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Calculate total violations for the profile view
+        const violations = user.history.reduce((acc, shift) => {
+            // Assuming outDuration is stored as a string like "5m" or "10m"
+            const mins = parseInt(shift.outDuration) || 0;
+            return acc + mins;
+        }, 0);
+
+        res.json({
+            ...user._doc,
+            currentShiftOutDuration: violations // This maps to your "Violations" stat in Flutter
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
