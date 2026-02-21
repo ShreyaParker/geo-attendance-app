@@ -1,7 +1,7 @@
 import User from '../models/User.js';
 import Room from '../models/Room.js';
 import jwt from 'jsonwebtoken';
-
+import bcrypt from 'bcryptjs';
 
 export const register = async (req, res) => {
     try {
@@ -12,10 +12,13 @@ export const register = async (req, res) => {
             return res.status(400).json({ error: "Email already exists" });
         }
 
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         const user = new User({
             name,
             email,
-            password,
+            password: hashedPassword,
             role: 'employee',
             dateOfJoining: new Date(dateOfJoining),
             faceData
@@ -30,21 +33,18 @@ export const register = async (req, res) => {
     }
 };
 
-
 export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-
         if (email === 'admin@hq.com' && password === 'cyber@123') {
-
             let admin = await User.findOne({ email: 'admin@hq.com' });
 
             if (!admin) {
                 admin = new User({
                     name: 'Admin HQ',
                     email: 'admin@hq.com',
-                    password: 'hashed_secret',
+                    password: await bcrypt.hash('cyber@123', 10),
                     role: 'admin'
                 });
                 await admin.save();
@@ -52,26 +52,25 @@ export const login = async (req, res) => {
 
             const token = jwt.sign(
                 { id: admin._id, role: 'admin' },
-                'secret_key'
+                process.env.JWT_SECRET || 'secret_key'
             );
 
             return res.json({ token, user: admin, room: null });
         }
-
-
 
         const user = await User.findOne({ email });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        if (user.password !== password) {
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch && password !== user.password) {
             return res.status(401).json({ error: "Invalid Password" });
         }
 
         const token = jwt.sign(
             { id: user._id, role: user.role },
-            'secret_key'
+            process.env.JWT_SECRET || 'secret_key'
         );
 
         let roomData = null;
@@ -90,8 +89,6 @@ export const login = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
-
 
 export const updateFaceModel = async (req, res) => {
     try {
@@ -126,14 +123,9 @@ export const updateFaceModel = async (req, res) => {
         user.faceData = JSON.stringify(faceCluster);
         await user.save();
 
-        console.log(
-            `Face model updated for ${user.name}. Samples: ${faceCluster.length}`
-        );
-
         res.json({ success: true, message: "Model updated" });
 
     } catch (err) {
-        console.error("Face Update Error:", err);
         res.status(500).json({ error: err.message });
     }
 };

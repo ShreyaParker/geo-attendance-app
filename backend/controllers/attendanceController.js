@@ -2,24 +2,29 @@ import User from '../models/User.js';
 import Room from '../models/Room.js';
 import Alert from '../models/Alert.js';
 
-
 const getDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
     const Δλ = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+        Math.cos(φ1) * Math.cos(φ2) *
+        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 };
 
-
 const formatDuration = (ms) => {
-    if (!ms || ms < 0) return "0m";
-    const h = Math.floor(ms / 3600000);
-    const m = Math.floor((ms % 3600000) / 60000);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    if (!ms || ms < 0) return "00:00:00";
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return [hours, minutes, seconds]
+        .map(v => String(v).padStart(2, '0'))
+        .join(':');
 };
 
 export const updateStatus = async (req, res, io) => {
@@ -32,13 +37,11 @@ export const updateStatus = async (req, res, io) => {
         const now = new Date();
         let alertTriggered = null;
 
-
         if (event === 'CLOCK_IN') {
             updates.isActiveShift = true;
             updates.shiftStartTime = now;
             updates.checkInImage = image;
             updates.currentShiftOutDuration = 0;
-
 
             let isInside = true;
             if (user.joinedRoomCode) {
@@ -99,7 +102,14 @@ export const updateStatus = async (req, res, io) => {
                 if (user.lastExitTime) finalOutDuration += (now - new Date(user.lastExitTime));
 
                 await User.findByIdAndUpdate(userId, {
-                    $push: { history: { start: user.shiftStartTime, end: now, duration: formatDuration(totalDiff), outDuration: formatDuration(finalOutDuration) } }
+                    $push: {
+                        history: {
+                            start: user.shiftStartTime,
+                            end: now,
+                            duration: formatDuration(totalDiff),
+                            outDuration: formatDuration(finalOutDuration)
+                        }
+                    }
                 });
             }
             updates.shiftStartTime = null;
@@ -117,107 +127,102 @@ export const updateStatus = async (req, res, io) => {
 
         res.json({ success: true });
 
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 export const getDashboard = async (req, res) => {
     try {
-        const { roomCode } = req.query; // Filter by room if sent
+        const { roomCode } = req.query;
         const query = { role: 'employee' };
         if (roomCode) query.joinedRoomCode = roomCode;
 
         const users = await User.find(query);
         res.json(users);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 export const getAlerts = async (req, res) => {
     try {
         const alerts = await Alert.find().sort({ timestamp: -1 }).limit(50);
         res.json(alerts);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 const parseDurationToMinutes = (str) => {
     if (!str) return 0;
-    let minutes = 0;
-    const hoursMatch = str.match(/(\d+)h/);
-    const minsMatch = str.match(/(\d+)m/);
-    if (hoursMatch) minutes += parseInt(hoursMatch[1]) * 60;
-    if (minsMatch) minutes += parseInt(minsMatch[1]);
-    return minutes;
+    const parts = str.split(':');
+    if (parts.length !== 3) return 0;
+    const hours = parseInt(parts[0]) || 0;
+    const minutes = parseInt(parts[1]) || 0;
+    const seconds = parseInt(parts[2]) || 0;
+    return (hours * 60) + minutes + (seconds / 60);
 };
 
 export const getMonthlyAttendance = async (req, res) => {
     try {
         const { roomCode, month, year } = req.query;
-        
-     
         const users = await User.find({ joinedRoomCode: roomCode });
-
-    
-        const calendarData = {}; 
-        
+        const calendarData = {};
 
         users.forEach(user => {
             user.history.forEach(session => {
                 const date = new Date(session.start).toISOString().split('T')[0];
-                
                 const sessionDate = new Date(session.start);
-                if (sessionDate.getMonth() + 1 !== parseInt(month) || sessionDate.getFullYear() !== parseInt(year)) return;
 
-               
+                if (sessionDate.getMonth() + 1 !== parseInt(month) ||
+                    sessionDate.getFullYear() !== parseInt(year)) return;
+
                 const outMinutes = parseDurationToMinutes(session.outDuration);
                 let status = 'PRESENT';
-                
-                if (outMinutes > 120) status = 'ABSENT_VIOLATION'; 
+                if (outMinutes > 120) status = 'ABSENT_VIOLATION';
 
                 if (!calendarData[date]) {
                     calendarData[date] = { date, present: 0, absent: 0, flagged: 0, records: [] };
                 }
 
-         
                 if (status === 'PRESENT') calendarData[date].present++;
                 else calendarData[date].flagged++;
 
                 calendarData[date].records.push({
                     userId: user._id,
                     name: user.name,
-                    status: status, 
+                    status,
                     inTime: session.start,
                     outTime: session.end,
                     totalOutDuration: session.outDuration,
-                    outMinutes: outMinutes
+                    outMinutes
                 });
             });
         });
 
         res.json(calendarData);
 
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
+
 export const getUserDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        
-        // Find user and include their shift history
-        const user = await User.findById(id).select('-password'); // Exclude password for security
-        
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
+        const user = await User.findById(id).select('-password');
+        if (!user) return res.status(404).json({ message: "User not found" });
 
-        // Calculate total violations for the profile view
         const violations = user.history.reduce((acc, shift) => {
-            // Assuming outDuration is stored as a string like "5m" or "10m"
-            const mins = parseInt(shift.outDuration) || 0;
-            return acc + mins;
+            return acc + parseDurationToMinutes(shift.outDuration);
         }, 0);
 
         res.json({
             ...user._doc,
-            currentShiftOutDuration: violations // This maps to your "Violations" stat in Flutter
+            currentShiftOutDuration: violations
         });
+
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
