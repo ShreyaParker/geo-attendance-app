@@ -27,21 +27,43 @@ const formatDuration = (ms) => {
         .join(':');
 };
 
+const parseDurationToMinutes = (str) => {
+    if (!str) return 0;
+    const parts = str.split(':');
+    if (parts.length !== 3) return 0;
+    const hours = parseInt(parts[0]) || 0;
+    const minutes = parseInt(parts[1]) || 0;
+    const seconds = parseInt(parts[2]) || 0;
+    return (hours * 60) + minutes + (seconds / 60);
+};
+
 export const updateStatus = async (req, res, io) => {
     try {
         const { userId, lat, lng, event, image } = req.body;
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        let updates = { lastLat: lat, lastLng: lng, lastSeen: new Date() };
         const now = new Date();
+        let updates = { lastLat: lat, lastLng: lng, lastSeen: now };
         let alertTriggered = null;
+
+        if (user.lastLat && user.lastLng && user.lastSeen) {
+            const timeDiffSeconds = (now - user.lastSeen) / 1000;
+            if (timeDiffSeconds > 0) {
+                const distMoved = getDistance(lat, lng, user.lastLat, user.lastLng);
+                const speedMetersPerSecond = distMoved / timeDiffSeconds;
+                if (speedMetersPerSecond > 50 && event !== 'CLOCK_IN') {
+                    return res.status(400).json({ error: "Invalid location jump detected." });
+                }
+            }
+        }
 
         if (event === 'CLOCK_IN') {
             updates.isActiveShift = true;
             updates.shiftStartTime = now;
             updates.checkInImage = image;
             updates.currentShiftOutDuration = 0;
+            updates.alertTriggeredForThisExit = false;
 
             let isInside = true;
             if (user.joinedRoomCode) {
@@ -51,11 +73,11 @@ export const updateStatus = async (req, res, io) => {
                     isInside = dist <= room.radius;
                 }
             }
+
             updates.isInsideZone = isInside;
 
             if (!isInside) {
                 updates.lastExitTime = now;
-
                 alertTriggered = new Alert({
                     type: 'CLOCK_IN_OUTSIDE',
                     message: `${user.name} clocked in OUTSIDE the zone.`,
@@ -68,38 +90,58 @@ export const updateStatus = async (req, res, io) => {
             }
         }
 
-        else if (event === 'EXIT_ZONE') {
-            updates.isInsideZone = false;
-            if (user.isActiveShift && !user.lastExitTime) {
-                updates.lastExitTime = now;
+        if (event !== 'CLOCK_OUT') {
+            let isInside = true;
+            if (user.joinedRoomCode) {
+                const room = await Room.findOne({ code: user.joinedRoomCode });
+                if (room) {
+                    const dist = getDistance(lat, lng, room.lat, room.lng);
+                    isInside = dist <= room.radius;
+                }
+            }
 
-                alertTriggered = new Alert({
-                    type: 'EXIT_ZONE',
-                    message: `${user.name} left the zone boundaries!`,
-                    userId: user._id,
-                    userName: user.name
-                });
-                await alertTriggered.save();
+            if (!isInside && user.isInsideZone) {
+                updates.isInsideZone = false;
+                if (!user.lastExitTime) updates.lastExitTime = now;
+            } 
+            else if (!isInside && !user.isInsideZone) {
+                if (user.lastExitTime) {
+                    const timeOutsideMs = now - user.lastExitTime;
+                    if (timeOutsideMs > 300000 && !user.alertTriggeredForThisExit) {
+                        alertTriggered = new Alert({
+                            type: 'EXIT_ZONE',
+                            message: `${user.name} has been outside the zone for over 5 minutes.`,
+                            userId: user._id,
+                            userName: user.name
+                        });
+                        await alertTriggered.save();
+                        updates.alertTriggeredForThisExit = true;
+                    }
+                }
+            }
+            else if (isInside && !user.isInsideZone) {
+                updates.isInsideZone = true;
+                updates.alertTriggeredForThisExit = false;
+                if (user.lastExitTime) {
+                    const diff = now - new Date(user.lastExitTime);
+                    updates.currentShiftOutDuration =
+                        (user.currentShiftOutDuration || 0) + diff;
+                    updates.lastExitTime = null;
+                }
             }
         }
 
-        else if (event === 'ENTER_ZONE') {
-            updates.isInsideZone = true;
-            if (user.isActiveShift && user.lastExitTime) {
-                const diff = now - new Date(user.lastExitTime);
-                updates.currentShiftOutDuration = (user.currentShiftOutDuration || 0) + diff;
-                updates.lastExitTime = null;
-            }
-        }
-
-        else if (event === 'CLOCK_OUT') {
+        if (event === 'CLOCK_OUT') {
             updates.isActiveShift = false;
             updates.isInsideZone = false;
 
             if (user.shiftStartTime) {
                 const totalDiff = now - new Date(user.shiftStartTime);
                 let finalOutDuration = user.currentShiftOutDuration || 0;
-                if (user.lastExitTime) finalOutDuration += (now - new Date(user.lastExitTime));
+
+                if (user.lastExitTime) {
+                    finalOutDuration += (now - new Date(user.lastExitTime));
+                }
 
                 await User.findByIdAndUpdate(userId, {
                     $push: {
@@ -112,9 +154,11 @@ export const updateStatus = async (req, res, io) => {
                     }
                 });
             }
+
             updates.shiftStartTime = null;
             updates.lastExitTime = null;
             updates.currentShiftOutDuration = 0;
+            updates.alertTriggeredForThisExit = false;
         }
 
         await User.findByIdAndUpdate(userId, updates);
@@ -122,6 +166,7 @@ export const updateStatus = async (req, res, io) => {
         if (alertTriggered) {
             io.emit('new_alert', alertTriggered);
         }
+
         const freshUser = await User.findById(userId);
         io.emit('status_update', freshUser);
 
@@ -154,16 +199,6 @@ export const getAlerts = async (req, res) => {
     }
 };
 
-const parseDurationToMinutes = (str) => {
-    if (!str) return 0;
-    const parts = str.split(':');
-    if (parts.length !== 3) return 0;
-    const hours = parseInt(parts[0]) || 0;
-    const minutes = parseInt(parts[1]) || 0;
-    const seconds = parseInt(parts[2]) || 0;
-    return (hours * 60) + minutes + (seconds / 60);
-};
-
 export const getMonthlyAttendance = async (req, res) => {
     try {
         const { roomCode, month, year } = req.query;
@@ -172,18 +207,27 @@ export const getMonthlyAttendance = async (req, res) => {
 
         users.forEach(user => {
             user.history.forEach(session => {
-                const date = new Date(session.start).toISOString().split('T')[0];
                 const sessionDate = new Date(session.start);
 
-                if (sessionDate.getMonth() + 1 !== parseInt(month) ||
-                    sessionDate.getFullYear() !== parseInt(year)) return;
+                if (
+                    sessionDate.getMonth() + 1 !== parseInt(month) ||
+                    sessionDate.getFullYear() !== parseInt(year)
+                ) return;
 
+                const date = sessionDate.toISOString().split('T')[0];
                 const outMinutes = parseDurationToMinutes(session.outDuration);
+
                 let status = 'PRESENT';
                 if (outMinutes > 120) status = 'ABSENT_VIOLATION';
 
                 if (!calendarData[date]) {
-                    calendarData[date] = { date, present: 0, absent: 0, flagged: 0, records: [] };
+                    calendarData[date] = {
+                        date,
+                        present: 0,
+                        absent: 0,
+                        flagged: 0,
+                        records: []
+                    };
                 }
 
                 if (status === 'PRESENT') calendarData[date].present++;
@@ -202,7 +246,6 @@ export const getMonthlyAttendance = async (req, res) => {
         });
 
         res.json(calendarData);
-
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -222,7 +265,6 @@ export const getUserDetails = async (req, res) => {
             ...user._doc,
             currentShiftOutDuration: violations
         });
-
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
